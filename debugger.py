@@ -306,50 +306,6 @@ class CpuContext(DebugStructure):
     ]
 
 
-# elif arch == 'x86':
-#     class FloatSave(DebugStructure):
-#         _fields_ = [
-#             ("ControlWord", DWORD),
-#             ("StatusWord", DWORD),
-#             ("TagWord", DWORD),
-#             ("ErrorOffset", DWORD),
-#             ("ErrorSelector", DWORD),
-#             ("DataOffset", DWORD),
-#             ("DataSelector", DWORD),
-#             ("RegisterArea", BYTE*80),
-#             ("Cr0NpxState", DWORD),
-#         ]
-#
-#     class CpuContext(DebugStructure):
-#         _fields_ = [
-#             ("ContextFlags", DWORD),
-#             ("Dr0", DWORD),
-#             ("Dr1", DWORD),
-#             ("Dr2", DWORD),
-#             ("Dr3", DWORD),
-#             ("Dr6", DWORD),
-#             ("Dr7", DWORD),
-#             ('FloatSave', FloatSave),
-#             ("SegGs", DWORD),
-#             ("SegFs", DWORD),
-#             ("SegEs", DWORD),
-#             ("SegDs", DWORD),
-#             ("Edi", DWORD),
-#             ("Esi", DWORD),
-#             ("Ebx", DWORD),
-#             ("Edx", DWORD),
-#             ("Ecx", DWORD),
-#             ("Eax", DWORD),
-#             ("Ebp", DWORD),
-#             ("Eip", DWORD),
-#             ("SegCs", DWORD),
-#             ("EFlags", DWORD),
-#             ("Esp", DWORD),
-#             ("SegSs", DWORD),
-#             ("ExtendedRegisters", BYTE*512),
-#         ]
-
-
 def get_filename_from_handle(dll_handle):
     buffer = ctypes.create_string_buffer(0x100)
     size = ctypes.windll.kernel32.GetFinalPathNameByHandleA(dll_handle, buffer, 0x100, 0x0)
@@ -368,8 +324,10 @@ class Debugger:
     process_id = None
     thread_id = None
     cpu_context = CpuContext()
+    debug_event = DebugEvent(0, 0, 0)
+    print = False
 
-    def __init__(self, file_name, breakpoints=None, break_handles=None, debug=False):
+    def __init__(self, file_name, breakpoints=None, break_handles=None, debug=False, print_context=False):
         self.file_name = file_name
         if breakpoints:
             self.breakpoints = breakpoints
@@ -380,51 +338,74 @@ class Debugger:
         else:
             self.break_handles = {}
         self.debug = debug
+        self.print = print_context
+
+    def exception_event(self):
+        logger.info(
+            f"Exception event: pid {self.debug_event.processId}, tid {self.debug_event.threadId}\nException Not Handled")
+        if self.debug:
+            breakpoint()
+        if not ctypes.windll.kernel32.ContinueDebugEvent(self.debug_event.processId, self.debug_event.threadId,
+                                                         DEBUG_SIGNAL.DBG_EXCEPTION_NOT_HANDLED.value):
+            logger.warning('Continue event failed')
+
+    def create_process_event(self):
+        logger.info(f"Process created: pid {self.debug_event.processId}, tid {self.debug_event.threadId}")
+        self.process_id = self.debug_event.processId
+        self.thread_id = self.debug_event.threadId
+        file_handle = self.debug_event.info.createProcess.hfile
+        self.thread_handle = self.debug_event.info.createProcess.hThread
+        file_name = get_filename_from_handle(file_handle)
+        logger.info(file_name)
+
+    def create_thread_event(self):
+        logger.info(f"Thread created: pid {self.debug_event.processId}, tid {self.debug_event.threadId}")
+
+    def load_dll_event(self):
+        logger.info(f"DLL loaded: pid {self.debug_event.processId}, tid {self.debug_event.threadId}")
+        dll_handle = self.debug_event.info.loadDll.hfile
+        file_name = get_filename_from_handle(dll_handle)
+        self.dlls[self.debug_event.info.loadDll.lpBaseOfDll] = file_name
+        logger.info(file_name)
+
+    def unload_dll_event(self):
+        logger.info(f"DLL unloaded: pid {self.debug_event.processId}, tid {self.debug_event.threadId}")
+        logger.info(self.dlls[self.debug_event.info.unloadDll.lpBaseOfDll])
+
+    def exit_thread_event(self):
+        logger.info(f"Thread exited: pid {self.debug_event.processId}, tid {self.debug_event.threadId}")
+        logger.info(f'Exit code: {self.debug_event.info.exitThread.exitCode}')
+
+    def exit_program_event(self):
+        logger.info(f'Process exit event received. Exit code: {self.debug_event.info.exitProcess.exitCode}')
 
     def run(self):
         sp = subprocess.Popen(self.file_name, creationflags=PROCESS_CREATION.DEBUG_ONLY_THIS_PROCESS.value)
-        thread_handle = None
-        debug_event = DebugEvent(0, 0, 0)
         while True:
-            if ctypes.windll.kernel32.WaitForDebugEvent(ctypes.pointer(debug_event), 0x500):
+            if ctypes.windll.kernel32.WaitForDebugEvent(ctypes.pointer(self.debug_event), 0x500):
                 self.print_context()
-                if DEBUG_EVENT(debug_event.debugEventCode) == DEBUG_EVENT.EXCEPTION_DEBUG_EVENT:
-                    logger.info(
-                        f"Exception event: pid {debug_event.processId}, tid {debug_event.threadId}\nException Not Handled")
-                    breakpoint()
-                    if not ctypes.windll.kernel32.ContinueDebugEvent(debug_event.processId, debug_event.threadId,
-                                                                     DEBUG_SIGNAL.DBG_EXCEPTION_NOT_HANDLED.value):
-                        logger.warning('Continue event failed')
+                debug_event = DEBUG_EVENT(self.debug_event.debugEventCode)
+                logger.info(debug_event)
+                if debug_event == DEBUG_EVENT.EXIT_PROCESS_DEBUG_EVENT:
+                    self.exit_program_event()
+                    break
+                if debug_event == DEBUG_EVENT.EXCEPTION_DEBUG_EVENT:
+                    self.exception_event()
                     continue
-                elif DEBUG_EVENT(debug_event.debugEventCode) == DEBUG_EVENT.CREATE_PROCESS_DEBUG_EVENT:
-                    logger.info(f"Process created: pid {debug_event.processId}, tid {debug_event.threadId}")
-                    self.process_id = debug_event.processId
-                    self.thread_id = debug_event.threadId
-                    file_handle = debug_event.info.createProcess.hfile
-                    self.thread_handle = debug_event.info.createProcess.hThread
-                    file_name = get_filename_from_handle(file_handle)
-                    logger.info(file_name)
-                elif DEBUG_EVENT(debug_event.debugEventCode) == DEBUG_EVENT.CREATE_THREAD_DEBUG_EVENT:
-                    logger.info(f"Thread created: pid {debug_event.processId}, tid {debug_event.threadId}")
-                elif DEBUG_EVENT(debug_event.debugEventCode) == DEBUG_EVENT.LOAD_DLL_DEBUG_EVENT:
-                    logger.info(f"DLL loaded: pid {debug_event.processId}, tid {debug_event.threadId}")
-                    dll_handle = debug_event.info.loadDll.hfile
-                    file_name = get_filename_from_handle(dll_handle)
-                    self.dlls[debug_event.info.loadDll.lpBaseOfDll] = file_name
-                    logger.info(file_name)
-                elif DEBUG_EVENT(debug_event.debugEventCode) == DEBUG_EVENT.EXIT_THREAD_DEBUG_EVENT:
-                    logger.info(f"Thread exited: pid {debug_event.processId}, tid {debug_event.threadId}")
-                    logger.info(f'Exit code: {debug_event.info.exitThread.exitCode}')
-                elif DEBUG_EVENT(debug_event.debugEventCode) == DEBUG_EVENT.UNLOAD_DLL_DEBUG_EVENT:
-                    logger.info(f"DLL unloaded: pid {debug_event.processId}, tid {debug_event.threadId}")
-                    logger.info(self.dlls[debug_event.info.unloadDll.lpBaseOfDll])
-                if not ctypes.windll.kernel32.ContinueDebugEvent(debug_event.processId, debug_event.threadId,
+                elif debug_event == DEBUG_EVENT.CREATE_PROCESS_DEBUG_EVENT:
+                    self.create_process_event()
+                elif debug_event == DEBUG_EVENT.CREATE_THREAD_DEBUG_EVENT:
+                    self.create_thread_event()
+                elif debug_event == DEBUG_EVENT.LOAD_DLL_DEBUG_EVENT:
+                    self.load_dll_event()
+                elif debug_event == DEBUG_EVENT.EXIT_THREAD_DEBUG_EVENT:
+                    self.exit_thread_event()
+                elif debug_event == DEBUG_EVENT.UNLOAD_DLL_DEBUG_EVENT:
+                    self.unload_dll_event()
+                if not ctypes.windll.kernel32.ContinueDebugEvent(self.debug_event.processId, self.debug_event.threadId,
                                                                  DEBUG_SIGNAL.DBG_CONTINUE.value):
                     logger.warning('Continue event failed')
                     continue
-                if DEBUG_EVENT(debug_event.debugEventCode) == DEBUG_EVENT.EXIT_PROCESS_DEBUG_EVENT:
-                    logger.info(f'Process exit event received. Exit code: {debug_event.info.exitProcess.exitCode}')
-                    break
             else:
                 if self.debug and False:
                     breakpoint()
@@ -432,29 +413,27 @@ class Debugger:
                     time.sleep(50 / 1000)
         if ctypes.windll.kernel32.DebugActiveProcessStop(sp.pid):
             logger.info("active process debugging stopped")
-        exit_code = debug_event.info.exitProcess.exitCode
-        del debug_event
+        exit_code = self.debug_event.info.exitProcess.exitCode
         return exit_code
 
     def print_context(self):
-        success = self.read_thread_context()
-        context = self.cpu_context.as_dict()
-        print(
-            f"\nEAX = {context['Rax']:16x}  EBX = {context['Rbx']:16x}    ECX = {context['Rcx']:16x}\n",
-            f"EDX = {context['Rdx']:16x}  ESI = {context['Rsi']:16x}    EDI = {context['Rdi']:16x}\n",
-            f"EIP = {context['Rip']:16x}  ESP = {context['Rsp']:16x}    EBP = {context['Rbp']:16x}\n",
-            f"EFL = {context['EFlags']:16X}")
-        if context['Rip'] < 0x7ff000000000:
-            print(context['Rip'])
+        if self.print:
+            success = self.read_thread_context()
+            context = self.cpu_context.as_dict()
+            print(
+                f"\nEAX = {context['Rax']:16x}  EBX = {context['Rbx']:16x}    ECX = {context['Rcx']:16x}\n",
+                f"EDX = {context['Rdx']:16x}  ESI = {context['Rsi']:16x}    EDI = {context['Rdi']:16x}\n",
+                f"EIP = {context['Rip']:16x}  ESP = {context['Rsp']:16x}    EBP = {context['Rbp']:16x}\n",
+                f"EFL = {context['EFlags']:16X}")
 
     def read_thread_context(self):
         self.cpu_context = CpuContext()
-        self.cpu_context.ContextFlags = 0x00010000 | 0x1 | 0x2 | 0x4 | 0x8 | 0x10 | 0x20
+        self.cpu_context.ContextFlags = CONTEXT.CONTEXT_I386_ALL.value
         success = ctypes.windll.kernel32.GetThreadContext(self.thread_handle, ctypes.byref(self.cpu_context))
         return success
 
     def write_thread_context(self):
-        self.cpu_context.ContextFlags = 0x00010000 | 0x1 | 0x2 | 0x4
+        self.cpu_context.ContextFlags = CONTEXT.CONTEXT_I386_FULL.value
         success = ctypes.windll.kernel32.SetThreadContext(self.thread_handle, ctypes.pointer(self.cpu_context))
         return success
 
