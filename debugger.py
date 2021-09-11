@@ -463,7 +463,7 @@ class Debugger:
     def toggle_single_step(self):
         success = self.read_thread_context()
         if success:
-            self.cpu_context.EFlags &= 0x100
+            self.cpu_context.EFlags |= 0x100
             success = self.write_thread_context()
             self.single_step = True
         # not elif: success can change in the previous condition, so this will catch either fails
