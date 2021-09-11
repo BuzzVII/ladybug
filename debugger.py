@@ -473,7 +473,7 @@ class Debugger:
 
     def add_break_point(self, address):
         buffer, success = self.read_memory(address, 1)
-        if success:
+        if success and buffer != b'\xCC':
             self.breakpoints[address]['instruction'] = buffer
             buffer = ctypes.create_string_buffer(b'\xCC')
             success = self.write_memory(address, buffer, instruction=True)
