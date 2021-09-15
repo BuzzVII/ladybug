@@ -358,7 +358,7 @@ class Debugger:
                                                              DEBUG_SIGNAL.DBG_CONTINUE.value):
                 logger.warning('Continue event failed')
         elif self.single_step:
-            logger.info(f'Continuing program from {rip}')
+            logger.info(f'Continuing program from 0x{rip:x}')
             for address in self.breakpoints:
                 self.add_break_point(address)
             self.single_step = False
@@ -513,7 +513,8 @@ class Debugger:
         p.open()
         bytes_read = ctypes.c_ulong(0)
         # buffer = ctypes.create_string_buffer(b'\xCC')
-        success = ctypes.windll.kernel32.WriteProcessMemory(p.handle, address, buffer, 0x1, ctypes.byref(bytes_read))
+        # buffer is null terminated so take one from its length
+        success = ctypes.windll.kernel32.WriteProcessMemory(p.handle, address, buffer, len(buffer) - 1, ctypes.byref(bytes_read))
         if instruction and success:
             success = ctypes.windll.kernel32.FlushInstructionCache(p.handle, None, None)
         p.close()
