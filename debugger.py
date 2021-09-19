@@ -440,6 +440,10 @@ class Debugger:
         return self.debug_event.info.exitProcess.exitCode
 
     def print_context(self, show=False):
+        '''
+        :param show:
+        :return:
+        '''
         if self.print_reg or show:
             success = self.read_thread_context()
             context = self.cpu_context.as_dict()
@@ -472,6 +476,11 @@ class Debugger:
         return success
 
     def add_break_point(self, address):
+        '''
+        :param address:
+        :return:
+        Don't use single byte instructions because continue is broken.
+        '''
         buffer, success = self.read_memory(address, 1)
         if success and buffer != b'\xCC':
             self.breakpoints[address]['instruction'] = buffer
@@ -483,6 +492,11 @@ class Debugger:
             logger.warning(f'failed to add breakpoint to address: {address} in program {self.process_id}')
 
     def continue_break_point(self, address):
+        '''
+        :param address:
+        :return:
+        I don't think this works for single byte instructions
+        '''
         buffer = ctypes.create_string_buffer(self.breakpoints[address]['instruction'])
         success = self.write_memory(address, buffer, instruction=True)
         del buffer
@@ -512,7 +526,7 @@ class Debugger:
         p = rwm.get_process_by_id(self.process_id)
         p.open()
         bytes_read = ctypes.c_ulong(0)
-        # buffer = ctypes.create_string_buffer(b'\xCC')
+        # buffer = ctypes.create_string_buffer(b'\xCC') int3 instruction
         # buffer is null terminated so take one from its length
         success = ctypes.windll.kernel32.WriteProcessMemory(p.handle, address, buffer, len(buffer) - 1, ctypes.byref(bytes_read))
         if instruction and success:
