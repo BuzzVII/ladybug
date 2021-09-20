@@ -242,9 +242,3 @@ class Debugger:
         p.close()
         del buffer
         return success
-
-
-if __name__ == "__main__":
-    test_debugger = Debugger('cmake-build-debug/Debugee.exe', debug=True)
-    exit_code = test_debugger.run()
-    exit(exit_code)
