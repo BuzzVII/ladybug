@@ -2,7 +2,7 @@ import csv
 import json
 
 
-def main(input_file, offset = 0x400000):
+def main(input_file, offset=0x400000):
     module_name = input_file.split('.')[0] + '.exe'
 
     with open(input_file) as fid:

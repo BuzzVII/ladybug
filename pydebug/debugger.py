@@ -25,7 +25,6 @@ class Debugger:
     file_name = None
     thread_handle = None
     breakpoints = None
-    break_handles = None
     dlls = {}
     debug = False
     process_id = None
@@ -35,16 +34,12 @@ class Debugger:
     print_reg = False
     single_step = False
 
-    def __init__(self, file_name, breakpoints=None, break_handles=None, debug=False, print_context=False):
+    def __init__(self, file_name, breakpoints=None, debug=False, print_context=False):
         self.file_name = file_name
         if breakpoints:
             self.breakpoints = breakpoints
         else:
             self.breakpoints = {}
-        if break_handles:
-            self.break_handles = break_handles
-        else:
-            self.break_handles = {}
         self.debug = debug
         self.print_reg = print_context
 
@@ -54,6 +49,7 @@ class Debugger:
         self.read_thread_context()
         rip = self.cpu_context.Rip - 1
         if rip in self.breakpoints:
+            self.get_stack()
             self.breakpoints[rip]["hit"] += 1
             self.breakpoints[rip]["handle"](*self.breakpoints[rip]["args"], debugee=self)
             self.continue_break_point(rip)
@@ -61,12 +57,12 @@ class Debugger:
                 logger.debug(f"Single step: {self.toggle_single_step()}")
             else:
                 del self.breakpoints[rip]
-                logger.info(self.breakpoints)
+                logger.debug(self.breakpoints)
             if not ctypes.windll.kernel32.ContinueDebugEvent(self.debug_event.processId, self.debug_event.threadId,
                                                              DEBUG_SIGNAL.DBG_CONTINUE.value):
                 logger.warning('Continue event failed')
         elif self.single_step:
-            logger.info(f'Continuing program from 0x{rip:x}')
+            logger.debug(f'Continuing program from 0x{rip:x}')
             for address in self.breakpoints:
                 self.add_break_point(address)
             self.single_step = False
@@ -79,16 +75,16 @@ class Debugger:
                 logger.warning('Continue event failed')
 
     def create_process_event(self):
-        logger.info(f"Process created: pid {self.debug_event.processId}, tid {self.debug_event.threadId}")
+        logger.debug(f"Process created: pid {self.debug_event.processId}, tid {self.debug_event.threadId}")
         self.process_id = self.debug_event.processId
         self.thread_id = self.debug_event.threadId
         file_handle = self.debug_event.info.createProcess.hfile
         self.thread_handle = self.debug_event.info.createProcess.hThread
         file_name = get_filename_from_handle(file_handle)
-        logger.info(file_name)
+        logger.debug(file_name)
         for address in self.breakpoints:
             self.add_break_point(address)
-            logger.info(f'set breakpoint {address}:{self.breakpoints[address]}')
+            logger.debug(f'set breakpoint {address}:{self.breakpoints[address]}')
 
     def create_thread_event(self):
         logger.debug(f"Thread created: pid {self.debug_event.processId}, tid {self.debug_event.threadId}")
@@ -109,7 +105,7 @@ class Debugger:
         logger.debug(f'Exit code: {self.debug_event.info.exitThread.exitCode}')
 
     def exit_program_event(self):
-        logger.info(f'Process exit event received. Exit code: {self.debug_event.info.exitProcess.exitCode}')
+        logger.debug(f'Process exit event received. Exit code: {self.debug_event.info.exitProcess.exitCode}')
 
     def run(self):
         sp = subprocess.Popen(self.file_name, creationflags=PROCESS_CREATION.DEBUG_ONLY_THIS_PROCESS.value)
@@ -144,7 +140,7 @@ class Debugger:
                 else:
                     time.sleep(50 / 1000)
         if ctypes.windll.kernel32.DebugActiveProcessStop(sp.pid):
-            logger.info("active process debugging stopped")
+            logger.debug("active process debugging stopped")
         return self.debug_event.info.exitProcess.exitCode
 
     def print_context(self, show=False):
@@ -188,6 +184,7 @@ class Debugger:
         :param address:
         :return:
         Don't use single byte instructions because continue is broken.
+        HOnestly, don't do it, double check, triple check. You have done it THREE times now!
         '''
         buffer, success = self.read_memory(address, 1)
         if success and buffer != b'\xCC':
@@ -198,6 +195,19 @@ class Debugger:
         # not elif: success can change in the previous condition, so this will catch either fails
         if not success:
             logger.warning(f'failed to add breakpoint to address: {address} in program {self.process_id}')
+
+    def remove_break_point(self, address):
+        '''
+        :param address:
+        :return:
+        '''
+        self.print_context()
+        buffer = ctypes.create_string_buffer(self.breakpoints[address]['instruction'])
+        success = self.write_memory(address, buffer, instruction=True)
+        if success:
+            logger.info(f"breakpoint {address:x} removed: instruction {self.value} updated")
+        del buffer
+        del self.breakpoints[address]
 
     def continue_break_point(self, address):
         '''
@@ -242,3 +252,15 @@ class Debugger:
         p.close()
         del buffer
         return success
+
+    def get_stack(self):
+        rwm = ReadWriteMemory()
+        p = rwm.get_process_by_id(self.process_id)
+        p.open()
+        success = self.read_thread_context()
+        if success:
+            context = self.cpu_context
+            stackFrame = StackFrame()
+            stackFrame.from_context(context)
+            success = ctypes.windll.dbghelp.StackWalk64(IMAGE_FILE_MACHINE_I386, p.handle, self.thread_handle, ctypes.byref(stackFrame), ctypes.byref(context), None, None, None, None)
+        p.close()

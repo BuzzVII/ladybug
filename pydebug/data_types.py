@@ -2,6 +2,10 @@ import ctypes
 from ctypes.wintypes import *
 from enum import Enum
 
+IMAGE_FILE_MACHINE_I386 = 0x014c
+AddrModeFlat = 3
+DWORD64 = ctypes.c_uint64
+
 
 def as_dict(obj):
     field_dict = dict((f, getattr(obj, f)) for f, _ in obj._fields_)
@@ -237,20 +241,20 @@ class FltSave(DebugStructure):
         ("Reserved3", WORD),
         ("MxCsr", DWORD),
         ("MxCsr_Mask", DWORD),
-        ("FloatRegisters", ctypes.c_uint64 * (2 * 8)),
-        ("XmmRegisters", ctypes.c_uint64 * (2 * 16)),
+        ("FloatRegisters", DWORD64 * (2 * 8)),
+        ("XmmRegisters", DWORD64 * (2 * 16)),
         ("Reserved4", BYTE * 96),
     ]
 
 
 class CpuContext(DebugStructure):
     _fields_ = [
-        ("P1Home", ctypes.c_uint64),
-        ("P2Home", ctypes.c_uint64),
-        ("P3Home", ctypes.c_uint64),
-        ("P4Home", ctypes.c_uint64),
-        ("P5Home", ctypes.c_uint64),
-        ("P6Home", ctypes.c_uint64),
+        ("P1Home", DWORD64),
+        ("P2Home", DWORD64),
+        ("P3Home", DWORD64),
+        ("P4Home", DWORD64),
+        ("P5Home", DWORD64),
+        ("P6Home", DWORD64),
         ("ContextFlags", DWORD),
         ("MxCsr", DWORD),
         ("SegCs", WORD),
@@ -260,35 +264,92 @@ class CpuContext(DebugStructure):
         ("SegGs", WORD),
         ("SegSs", WORD),
         ("EFlags", DWORD),
-        ("Dr0", ctypes.c_uint64),
-        ("Dr1", ctypes.c_uint64),
-        ("Dr2", ctypes.c_uint64),
-        ("Dr3", ctypes.c_uint64),
-        ("Dr6", ctypes.c_uint64),
-        ("Dr7", ctypes.c_uint64),
-        ("Rax", ctypes.c_uint64),
-        ("Rcx", ctypes.c_uint64),
-        ("Rdx", ctypes.c_uint64),
-        ("Rbx", ctypes.c_uint64),
-        ("Rsp", ctypes.c_uint64),
-        ("Rbp", ctypes.c_uint64),
-        ("Rsi", ctypes.c_uint64),
-        ("Rdi", ctypes.c_uint64),
-        ("R8", ctypes.c_uint64),
-        ("R9", ctypes.c_uint64),
-        ("R10", ctypes.c_uint64),
-        ("R11", ctypes.c_uint64),
-        ("R12", ctypes.c_uint64),
-        ("R13", ctypes.c_uint64),
-        ("R14", ctypes.c_uint64),
-        ("R15", ctypes.c_uint64),
-        ("Rip", ctypes.c_uint64),
+        ("Dr0", DWORD64),
+        ("Dr1", DWORD64),
+        ("Dr2", DWORD64),
+        ("Dr3", DWORD64),
+        ("Dr6", DWORD64),
+        ("Dr7", DWORD64),
+        ("Rax", DWORD64),
+        ("Rcx", DWORD64),
+        ("Rdx", DWORD64),
+        ("Rbx", DWORD64),
+        ("Rsp", DWORD64),
+        ("Rbp", DWORD64),
+        ("Rsi", DWORD64),
+        ("Rdi", DWORD64),
+        ("R8", DWORD64),
+        ("R9", DWORD64),
+        ("R10", DWORD64),
+        ("R11", DWORD64),
+        ("R12", DWORD64),
+        ("R13", DWORD64),
+        ("R14", DWORD64),
+        ("R15", DWORD64),
+        ("Rip", DWORD64),
         ("FltSave", FltSave),
-        ("VectorRegister", ctypes.c_uint64 * (2 * 26)),
-        ("VectorControl", ctypes.c_uint64),
-        ("DebugControl", ctypes.c_uint64),
-        ("LastBranchToRip", ctypes.c_uint64),
-        ("LastBranchFromRip", ctypes.c_uint64),
-        ("LastExceptionToRip", ctypes.c_uint64),
-        ("LastExceptionFromRip", ctypes.c_uint64),
+        ("VectorRegister", DWORD64 * (2 * 26)),
+        ("VectorControl", DWORD64),
+        ("DebugControl", DWORD64),
+        ("LastBranchToRip", DWORD64),
+        ("LastBranchFromRip", DWORD64),
+        ("LastExceptionToRip", DWORD64),
+        ("LastExceptionFromRip", DWORD64),
     ]
+
+
+class Address(DebugStructure):
+    _fields_ = [
+        ("Offset", DWORD),
+        ("Segment", WORD),
+        ("Mode", DWORD), # NOT SURE SIZE: ADDRESS_MODE 3 for flat mode
+    ]
+
+
+class KDHelp(DebugStructure):
+    _fields_ = [
+        ("Thread", DWORD64),
+        ("ThCallbackStack", DWORD),
+        ("ThCallbackBStore", DWORD),
+        ("NextCallback", DWORD),
+        ("FramePointer", DWORD),
+        ("KiCallUserMode", DWORD64),
+        ("KeUserCallbackDispatcher", DWORD64),
+        ("SystemRangeStart", DWORD64),
+        ("KiUserExceptionDispatcher", DWORD64),
+        ("StackBase", DWORD64),
+        ("StackLimit", DWORD64),
+        ("BuildVersion", DWORD),
+        ("RetpolineStubFunctionTableSize", DWORD),
+        ("RetpolineStubFunctionTable", DWORD64),
+        ("RetpolineStubOffset", DWORD),
+        ("RetpolineStubSize", DWORD),
+        ("Reserved0", DWORD64*2),
+    ]
+
+
+class StackFrame(DebugStructure):
+    _fields_ = [
+        ("AddrPC", Address),
+        ("AddrReturn", Address),
+        ("AddrFrame", Address),
+        ("AddrStack", Address),
+        ("AddrBStore", Address),
+        ("FuncTableEntry", LPVOID),
+        ("Params", DWORD64 * (4)),
+        ("Far", BOOL),
+        ("Virtual", BOOL),
+        ("Reserved", DWORD64 * (3)),
+        ("KdHelp", KDHelp),
+        ("StackFrameSize", DWORD),
+        ("InlineFrameContext", DWORD),
+    ]
+
+    def from_context(self, context):
+        self.AddrPC.Offset = context.Rip
+        self.AddrPC.Mode = AddrModeFlat
+        self.AddrStack.Offset = context.Rsp
+        self.AddrStack.Mode = AddrModeFlat
+        self.AddrFrame.Offset = context.Rbp
+        self.AddrFrame.Mode = AddrModeFlat
+        self.StackFrameSize = ctypes.sizeof(StackFrame)
