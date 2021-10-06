@@ -4,6 +4,7 @@ import ctypes
 import subprocess
 import time
 import logging
+from typing import Dict, Any
 import signal
 import traceback
 import pdb
@@ -13,7 +14,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
 
 
-def get_filename_from_handle(dll_handle):
+def get_filename_from_handle(dll_handle: int) -> str:
     buffer = ctypes.create_string_buffer(0x100)
     size = ctypes.windll.kernel32.GetFinalPathNameByHandleA(dll_handle, buffer, 0x100, 0x0)
     file_name = buffer.raw[:size].decode()
@@ -22,19 +23,20 @@ def get_filename_from_handle(dll_handle):
 
 
 class Debugger:
-    file_name = None
-    thread_handle = None
-    breakpoints = None
-    dlls = {}
-    debug = False
-    process_id = None
-    thread_id = None
+    file_name: str
+    breakpoints: Dict[int, Dict[str, Any]]
+    debug: bool
+    print_reg: bool
+    process_id: int
+    thread_id: int
+    thread_handle: int
+    dlls: Dict[int, str] = {}
     cpu_context = CpuContext()
     debug_event = DebugEvent(0, 0, 0)
-    print_reg = False
-    single_step = False
+    single_step: bool = False
 
-    def __init__(self, file_name, breakpoints=None, debug=False, print_context=False):
+    def __init__(self, file_name: str, breakpoints: Dict[int, Dict[str, Any]] = None,
+                 debug: bool = False, print_context: bool = False):
         self.file_name = file_name
         if breakpoints:
             self.breakpoints = breakpoints
@@ -43,7 +45,7 @@ class Debugger:
         self.debug = debug
         self.print_reg = print_context
 
-    def exception_event(self):
+    def exception_event(self) -> None:
         logger.debug(
             f"Exception event: pid {self.debug_event.processId}, tid {self.debug_event.threadId} - {self.debug_event.info.exception.ExceptionCode}")
         self.read_thread_context()
@@ -74,7 +76,7 @@ class Debugger:
                                                              DEBUG_SIGNAL.DBG_EXCEPTION_NOT_HANDLED.value):
                 logger.warning('Continue event failed')
 
-    def create_process_event(self):
+    def create_process_event(self) -> None:
         logger.debug(f"Process created: pid {self.debug_event.processId}, tid {self.debug_event.threadId}")
         self.process_id = self.debug_event.processId
         self.thread_id = self.debug_event.threadId
@@ -86,28 +88,28 @@ class Debugger:
             self.add_break_point(address)
             logger.debug(f'set breakpoint {address}:{self.breakpoints[address]}')
 
-    def create_thread_event(self):
+    def create_thread_event(self) -> None:
         logger.debug(f"Thread created: pid {self.debug_event.processId}, tid {self.debug_event.threadId}")
 
-    def load_dll_event(self):
+    def load_dll_event(self) -> None:
         logger.debug(f"DLL loaded: pid {self.debug_event.processId}, tid {self.debug_event.threadId}")
         dll_handle = self.debug_event.info.loadDll.hfile
         file_name = get_filename_from_handle(dll_handle)
         self.dlls[self.debug_event.info.loadDll.lpBaseOfDll] = file_name
         logger.debug(file_name)
 
-    def unload_dll_event(self):
+    def unload_dll_event(self) -> None:
         logger.debug(f"DLL unloaded: pid {self.debug_event.processId}, tid {self.debug_event.threadId}")
         logger.debug(self.dlls[self.debug_event.info.unloadDll.lpBaseOfDll])
 
-    def exit_thread_event(self):
+    def exit_thread_event(self) -> None:
         logger.debug(f"Thread exited: pid {self.debug_event.processId}, tid {self.debug_event.threadId}")
         logger.debug(f'Exit code: {self.debug_event.info.exitThread.exitCode}')
 
-    def exit_program_event(self):
+    def exit_program_event(self) -> None:
         logger.debug(f'Process exit event received. Exit code: {self.debug_event.info.exitProcess.exitCode}')
 
-    def run(self):
+    def run(self) -> int:
         sp = subprocess.Popen(self.file_name, creationflags=PROCESS_CREATION.DEBUG_ONLY_THIS_PROCESS.value)
         while True:
             if ctypes.windll.kernel32.WaitForDebugEvent(ctypes.pointer(self.debug_event), 0x500):
@@ -143,7 +145,7 @@ class Debugger:
             logger.debug("active process debugging stopped")
         return self.debug_event.info.exitProcess.exitCode
 
-    def print_context(self, show=False):
+    def print_context(self, show: bool = False) -> None:
         '''
         :param show:
         :return:
@@ -157,18 +159,18 @@ class Debugger:
                 f"EIP = {context['Rip']:16x}  ESP = {context['Rsp']:16x}    EBP = {context['Rbp']:16x}\n",
                 f"EFL = {context['EFlags']:16X}")
 
-    def read_thread_context(self):
+    def read_thread_context(self) -> bool:
         self.cpu_context = CpuContext()
         self.cpu_context.ContextFlags = CONTEXT.CONTEXT_I386_ALL.value
         success = ctypes.windll.kernel32.GetThreadContext(self.thread_handle, ctypes.byref(self.cpu_context))
         return success
 
-    def write_thread_context(self):
+    def write_thread_context(self) -> bool:
         self.cpu_context.ContextFlags = CONTEXT.CONTEXT_I386_ALL.value
         success = ctypes.windll.kernel32.SetThreadContext(self.thread_handle, ctypes.byref(self.cpu_context))
         return success
 
-    def toggle_single_step(self):
+    def toggle_single_step(self) -> bool:
         success = self.read_thread_context()
         if success:
             self.cpu_context.EFlags |= 0x100
@@ -179,7 +181,7 @@ class Debugger:
             logger.warning(f'failed to set single step in program {self.process_id}')
         return success
 
-    def add_break_point(self, address):
+    def add_break_point(self, address: int) -> None:
         '''
         :param address:
         :return:
@@ -196,7 +198,7 @@ class Debugger:
         if not success:
             logger.warning(f'failed to add breakpoint to address: {address} in program {self.process_id}')
 
-    def remove_break_point(self, address):
+    def remove_break_point(self, address: int) -> None:
         '''
         :param address:
         :return:
@@ -205,11 +207,11 @@ class Debugger:
         buffer = ctypes.create_string_buffer(self.breakpoints[address]['instruction'])
         success = self.write_memory(address, buffer, instruction=True)
         if success:
-            logger.info(f"breakpoint {address:x} removed: instruction {self.value} updated")
+            logger.info(f"breakpoint {address:x} removed: instruction 0x{self.breakpoints[address]['instruction']} updated")
         del buffer
         del self.breakpoints[address]
 
-    def continue_break_point(self, address):
+    def continue_break_point(self, address: int) -> None:
         '''
         :param address:
         :return:
@@ -227,40 +229,45 @@ class Debugger:
         if not success:
             logger.warning(f'failed to resume breakpoint to address: {address} in program {self.process_id}')
 
-    def read_memory(self, address, read_length):
+    def read_memory(self, address: int, read_length: int) -> (bytes, bool):
         rwm = ReadWriteMemory()
         p = rwm.get_process_by_id(self.process_id)
         p.open()
         bytes_read = ctypes.c_ulong(0)
         buffer = ctypes.create_string_buffer(read_length)
-        success = ctypes.windll.kernel32.ReadProcessMemory(p.handle, address, buffer, read_length, ctypes.byref(bytes_read))
+        success = ctypes.windll.kernel32.ReadProcessMemory(p.handle, address, buffer, read_length,
+                                                           ctypes.byref(bytes_read))
         p.close()
         mem_copy = buffer.raw
         del buffer
         return mem_copy, success
 
-    def write_memory(self, address, buffer, instruction=False):
+    # TODO: change to take in bytes instead of char array
+    def write_memory(self, address: int, buffer: ctypes.c_char, instruction: bool = False) -> bool:
         rwm = ReadWriteMemory()
         p = rwm.get_process_by_id(self.process_id)
         p.open()
         bytes_read = ctypes.c_ulong(0)
         # buffer = ctypes.create_string_buffer(b'\xCC') int3 instruction
         # buffer is null terminated so take one from its length
-        success = ctypes.windll.kernel32.WriteProcessMemory(p.handle, address, buffer, len(buffer) - 1, ctypes.byref(bytes_read))
+        success = ctypes.windll.kernel32.WriteProcessMemory(p.handle, address, buffer, len(buffer) - 1,
+                                                            ctypes.byref(bytes_read))
         if instruction and success:
             success = ctypes.windll.kernel32.FlushInstructionCache(p.handle, None, None)
         p.close()
         del buffer
         return success
 
-    def get_stack(self):
+    def get_stack(self) -> None:
         rwm = ReadWriteMemory()
         p = rwm.get_process_by_id(self.process_id)
         p.open()
         success = self.read_thread_context()
         if success:
             context = self.cpu_context
-            stackFrame = StackFrame()
-            stackFrame.from_context(context)
-            success = ctypes.windll.dbghelp.StackWalk64(IMAGE_FILE_MACHINE_I386, p.handle, self.thread_handle, ctypes.byref(stackFrame), ctypes.byref(context), None, None, None, None)
+            stack_frame = StackFrame()
+            stack_frame.from_context(context)
+            success = ctypes.windll.dbghelp.StackWalk64(IMAGE_FILE_MACHINE_I386, p.handle, self.thread_handle,
+                                                        ctypes.byref(stack_frame), ctypes.byref(context), None, None,
+                                                        None, None)
         p.close()

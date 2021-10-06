@@ -1,5 +1,6 @@
 import ctypes
 from ctypes.wintypes import *
+from typing import Dict, List, Any
 from enum import Enum
 
 IMAGE_FILE_MACHINE_I386 = 0x014c
@@ -7,8 +8,8 @@ AddrModeFlat = 3
 DWORD64 = ctypes.c_uint64
 
 
-def as_dict(obj):
-    field_dict = dict((f, getattr(obj, f)) for f, _ in obj._fields_)
+def as_dict(obj: object) -> Dict[str, Any]:
+    field_dict = {f: getattr(obj, f) for f, _ in obj._fields_}
     for key in field_dict:
         item = field_dict[key]
         if hasattr(item, 'as_dict'):
@@ -18,16 +19,12 @@ def as_dict(obj):
     return field_dict
 
 
-def from_dict(field_dict):
-    return field_dict
-
-
 class DebugStructure(ctypes.Structure):
-    def as_dict(self):
+    def as_dict(self) -> Dict[str, Any]:
         return as_dict(self)
 
     @classmethod
-    def from_dict(cls, field_dict):
+    def from_dict(cls, field_dict: Dict[str, Any]) -> 'DebugStructure':
         for key in field_dict:
             item = field_dict[key]
             if hasattr(item, '_fields_'):
@@ -39,7 +36,7 @@ class DebugStructure(ctypes.Structure):
 
 
 class DebugUnion(ctypes.Union):
-    def as_dict(self):
+    def as_dict(self) -> Dict[str, Any]:
         return as_dict(self)
 
 
@@ -345,7 +342,7 @@ class StackFrame(DebugStructure):
         ("InlineFrameContext", DWORD),
     ]
 
-    def from_context(self, context):
+    def from_context(self, context:CpuContext):
         self.AddrPC.Offset = context.Rip
         self.AddrPC.Mode = AddrModeFlat
         self.AddrStack.Offset = context.Rsp
