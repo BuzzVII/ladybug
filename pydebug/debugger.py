@@ -4,7 +4,7 @@ import ctypes
 import subprocess
 import time
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Union, Tuple
 import signal
 import traceback
 import pdb
@@ -191,9 +191,9 @@ class Debugger:
         buffer, success = self.read_memory(address, 1)
         if success and buffer != b'\xCC':
             self.breakpoints[address]['instruction'] = buffer
-            buffer = ctypes.create_string_buffer(b'\xCC')
-            success = self.write_memory(address, buffer, instruction=True)
-            del buffer
+            new_buffer = ctypes.create_string_buffer(b'\xCC')
+            success = self.write_memory(address, new_buffer, instruction=True)
+            del new_buffer
         # not elif: success can change in the previous condition, so this will catch either fails
         if not success:
             logger.warning(f'failed to add breakpoint to address: {address} in program {self.process_id}')
@@ -229,7 +229,7 @@ class Debugger:
         if not success:
             logger.warning(f'failed to resume breakpoint to address: {address} in program {self.process_id}')
 
-    def read_memory(self, address: int, read_length: int) -> (bytes, bool):
+    def read_memory(self, address: int, read_length: int) -> Tuple[bytes, bool]:
         rwm = ReadWriteMemory()
         p = rwm.get_process_by_id(self.process_id)
         p.open()
@@ -243,7 +243,7 @@ class Debugger:
         return mem_copy, success
 
     # TODO: change to take in bytes instead of char array
-    def write_memory(self, address: int, buffer: ctypes.c_char, instruction: bool = False) -> bool:
+    def write_memory(self, address: int, buffer: ctypes.Array[ctypes.c_char], instruction: bool = False) -> bool:
         rwm = ReadWriteMemory()
         p = rwm.get_process_by_id(self.process_id)
         p.open()
